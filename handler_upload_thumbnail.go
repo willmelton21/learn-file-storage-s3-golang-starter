@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
+   "os"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
-	_"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
+	_ "github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
+	"path/filepath"
 )
 
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -43,13 +44,31 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	file,header, err := r.FormFile("thumbnail")
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error forming file from thumbnail",err)
+		return
+	}
 	defer file.Close()
 
-	mediaTypeFromHeader := header.Header.Get("Content-Type")
+	mediaType := header.Header.Get("Content-Type")
+	extension := ""
+	switch mediaType {
+    case "image/png":
+        extension = "png"
+    case "image/jpeg":
+        extension = "jpg"
+    // Add other cases as needed
+    default:
+        extension = "bin" // Fallback
+}
+	vidIDString := videoID.String()	
 
-	stream, err := io.ReadAll(file)
+	filePath := filepath.Join(cfg.assetsRoot,vidIDString +"." + extension) 
+	filePathFull := "http://localhost:" + cfg.port + "/" + filePath 
+
+	createdFile, err := os.Create(filePath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't Read file to stream",err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create file with given file string",err)
 		return
 	}
 
@@ -63,11 +82,21 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	newThumbnail := thumbnail{data: stream,mediaType: mediaTypeFromHeader}
+	_, err = io.Copy(createdFile,file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't copy file to assets directory",err)
+		return
 
-	videoThumbnails[videoID] = newThumbnail
-   thumbnailURL := fmt.Sprintf("http://localhost:%d/api/thumbnails/%d", cfg.port, videoID)
-	dbVid.ThumbnailURL = &thumbnailURL
+	}
+
+	//encodedString := base64.StdEncoding.EncodeToString(stream)
+
+	//dataURL := fmt.Sprintf("data:%s;base64,%s",mediaTypeFromHeader,encodedString)
+
+	//newThumbnail := thumbnail{data: stream,mediaType: mediaTypeFromHeader}
+
+   //thumbnailURL := fmt.Sprintf("http://localhost:%s/api/thumbnails/%d", cfg.port, videoID)
+	dbVid.ThumbnailURL = &filePathFull
 	err = cfg.db.UpdateVideo(dbVid)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update file with new URL",err)
