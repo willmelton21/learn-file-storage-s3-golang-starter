@@ -5,10 +5,13 @@ import (
 	"io"
 	"net/http"
    "os"
+	"mime"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	_ "github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 	"path/filepath"
+	"crypto/rand"
+	"encoding/base64"
 )
 
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
@@ -61,9 +64,33 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
     default:
         extension = "bin" // Fallback
 }
-	vidIDString := videoID.String()	
+	parsedMediaType,_,err :=	mime.ParseMediaType(mediaType)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't Parse Media Type",err)
+		return
+	}
+	fmt.Println("parsedMediaType is ",parsedMediaType)
+	if parsedMediaType != "image/jpeg" && parsedMediaType != "image/png" {
+		respondWithError(w, http.StatusUnauthorized, "Only png and jpegs can be used for Upload",err)
+		return
+	}
 
-	filePath := filepath.Join(cfg.assetsRoot,vidIDString +"." + extension) 
+
+	key := make([]byte,32)
+	bytesRead, err :=	rand.Read(key)
+	if bytesRead != len(key) {
+		respondWithError(w, http.StatusInternalServerError, "BytesRead was not equal to the length of buffer",err)
+		return
+	}
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't fill buffer with data",err)
+		return
+	}
+
+	urlEncoded := base64.RawURLEncoding.EncodeToString(key)
+
+
+	filePath := filepath.Join(cfg.assetsRoot,urlEncoded +"." + extension) 
 	filePathFull := "http://localhost:" + cfg.port + "/" + filePath 
 
 	createdFile, err := os.Create(filePath)
