@@ -165,3 +165,4 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	}
 	return "other", nil
 }
+
