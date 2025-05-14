@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,11 +13,37 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+	"strings"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video,error) {
+
+	if video.VideoURL == nil {
+		return video,nil
+	}
+	
+   splitted := strings.Split(*video.VideoURL, ",")
+	fmt.Println("splitted:", splitted)
+
+   expireTime := 5 * time.Minute
+	if len(splitted) == 2 {
+		url, err := generatePresignedURL(cfg.S3Client,splitted[1],splitted[0],expireTime)
+		if err != nil {
+			return video,err
+		}	
+		video.VideoURL = &url
+		return video,nil
+	} else {
+		return video,nil
+	}
+	
+}
+
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
 	const uploadLimit = 1 << 30
@@ -133,11 +160,16 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	url := cfg.getObjectURL(key)
-	video.VideoURL = &url
+	video.VideoURL = &combined
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video", err)
+		return
+	}
+
+	video, err  = cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't update video URL", err)
 		return
 	}
 
@@ -191,6 +223,17 @@ func getVideoAspectRatio(filePath string) (string, error) {
 func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
 	presign :=	s3.NewPresignClient(s3Client)
 
-	presign.PresignGetObject(s3.WithPresignExpires(expireTime))
 
+	objInput := &s3.GetObjectInput{
+					Bucket: aws.String(bucket),
+					Key: aws.String(key),
+					}
+
+	httpReq, err := presign.PresignGetObject(context.TODO(),objInput,s3.WithPresignExpires(expireTime))
+	if err != nil {
+		return "",err
+	}
+
+	return httpReq.URL,nil
 }
+
