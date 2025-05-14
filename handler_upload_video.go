@@ -11,7 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
+	"time"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -102,12 +102,30 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		directory = "other"
 	}
 
+	outPath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error processing video for fast start", err)
+		return
+	}
+
+	processedFile, err := os.Open(outPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error opening video for fast start", err)
+		return
+	}
+
+
 	key := getAssetPath(mediaType)
 	key = filepath.Join(directory, key)
+	fmt.Println("key is ",key)
+	fmt.Println("bucket is ",cfg.s3Bucket)
+
+	combined := key +","+cfg.s3Bucket
+
 	_, err = cfg.S3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key),
-		Body:        tempFile,
+		Body:        processedFile,
 		ContentType: aws.String(mediaType),
 	})
 	if err != nil {
@@ -147,6 +165,9 @@ func getVideoAspectRatio(filePath string) (string, error) {
 			Height int `json:"height"`
 		} `json:"streams"`
 	}
+   
+	
+
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		return "", fmt.Errorf("could not parse ffprobe output: %v", err)
 	}
@@ -166,3 +187,10 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	return "other", nil
 }
 
+
+func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+	presign :=	s3.NewPresignClient(s3Client)
+
+	presign.PresignGetObject(s3.WithPresignExpires(expireTime))
+
+}
